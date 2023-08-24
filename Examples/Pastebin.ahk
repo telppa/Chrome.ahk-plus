@@ -1,4 +1,4 @@
-#NoEnv
+﻿#NoEnv
 SetBatchLines, -1
 
 #Include ../Chrome.ahk
@@ -8,7 +8,6 @@ SetBatchLines, -1
 
 ; Instead of providing a URL here, let's try
 ; navigating later for demonstration purposes
-FileCreateDir, ChromeProfile
 ChromeInst := new Chrome("ChromeProfile")
 
 
