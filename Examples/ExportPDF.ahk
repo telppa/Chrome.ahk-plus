@@ -1,4 +1,4 @@
-#NoEnv
+﻿#NoEnv
 SetBatchLines, -1
 
 #Include ../Chrome.ahk
@@ -6,7 +6,6 @@ SetBatchLines, -1
 
 ; --- Create a new headless Chrome instance ---
 
-FileCreateDir, ChromeProfile
 ChromeInst := new Chrome("ChromeProfile", "https://example.com", "--headless")
 
 
