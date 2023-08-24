@@ -1,7 +1,7 @@
 # Chrome.ahk-plus
 
 Automate Google Chrome and MS Edge using native AutoHotkey.  
-使用纯 AutoHotkey 操控 Google Chrome 和 MS Edge 。
+使用纯 AutoHotkey 操控 Chrome 和 Edge 。
 
 
 ## What has been enhanced compared to Chrome.ahk
