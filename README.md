@@ -10,6 +10,14 @@ Automate Google Chrome and MS Edge using native AutoHotkey.
 * Simplified creation of ProfilePath.
 * Fixed an issue that Chrome to report error due to slow opening.
 * Fixed an issue that Chrome to report error due to shortcuts were not found.
+* 基于 GeekDude 2023.03.21 Release 版修改，与 GeekDude 版相比有以下增强。
+* 支持谷歌 Chrome 与微软 Edge 。
+* 报错可直接定位到用户代码，而不是库代码。
+* 为所有可能造成死循环的地方添加了默认30秒的超时参数。
+* 简化了 Chrome 用户配置目录的创建。
+* 修复了 Chrome 打开缓慢而报错的问题。
+* 修复了找不到开始菜单中的 Chrome 快捷方式而报错的问题。
+
 
 ## How it works
 
