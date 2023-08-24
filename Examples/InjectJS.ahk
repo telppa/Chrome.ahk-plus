@@ -6,7 +6,6 @@ SetBatchLines, -1
 
 ; --- Create a new Chrome instance ---
 
-FileCreateDir, ChromeProfile
 ChromeInst := new Chrome("ChromeProfile", "https://autohotkey.com/")
 
 
