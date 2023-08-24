@@ -1,7 +1,0 @@
-[submodule "lib/WebSocket.ahk"]
-	path = lib/WebSocket.ahk
-	url = https://github.com/G33kDude/WebSocket.ahk.git
-[submodule "lib/cJson.ahk"]
-	path = lib/cJson.ahk
-	url = https://github.com/G33kDude/cJson.ahk.git
-	branch = main
