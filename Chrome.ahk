@@ -1,6 +1,5 @@
-﻿; Chrome.ahk v1.3.4
-; Copyright (c) 2023 Philip Taylor (known also as GeekDude, G33kDude) and contributors
-; https://github.com/G33kDude/Chrome.ahk
+﻿; Chrome.ahk-plus v1.3.5
+; https://github.com/telppa/Chrome.ahk-plus
 
 ; 基于 GeekDude 2023.03.21 Release 版修改，与 GeekDude 版相比有以下增强。
 ; 支持谷歌 Chrome 与微软 Edge 。
@@ -9,7 +8,6 @@
 ; 简化了 Chrome 用户配置目录的创建。
 ; 修复了 Chrome 打开缓慢而报错的问题。
 ; 修复了找不到开始菜单中的 Chrome 快捷方式而报错的问题。
-; 为了不给人造成迷惑，版本号改为了 v1.3.4。
 
 ; pageinst.call() 支持的参数与命令行支持的参数
 ; https://chromedevtools.github.io/devtools-protocol/tot/Browser/
@@ -18,7 +16,7 @@
 ; 注意事项：
 ; 相同的 ProfilePath ，无法指定不同的 DebugPort ，会被 Chrome 自动修改为相同的 DebugPort 。
 ; 不要在 page.Evaluate() 前加 Critical ，这会导致 Evaluate() 返回不了值，而你很难发现它出错了。
-; 与 GeekDude 版保持大部分兼容性，但存在 Timeout 参数的函数可能因参数顺序不同而不兼容（例如 GetPageBy() 在这里有7个参数，在 GeekDude 版只有6个）。
+; 为了与 GeekDude 版保持兼容性，本增强版从 1.3.5 开始调换了所有 Timeout 参数的位置，故可能与本增强版的旧版不兼容。
 
 ; 以后的人要想同步更新这个库，强烈建议使用 BCompare 之类的比较程序，比较着 GeekDude Release 版本进行更新。
 ; 不要尝试用未 Release 版本（即代码中有 “#Include JSON.ahk” “#Include WebSocket.ahk” 字样）进行更新。
@@ -26,7 +24,7 @@
 
 class Chrome
 {
-	static version := "1.3.4"
+	static version := "1.3.5"
 	
 	static DebugPort := 9222
 	
@@ -206,10 +204,10 @@ class Chrome
 		Value      - The value to search for in the provided key
 		MatchMode  - What kind of search to use, such as "exact", "contains", "startswith", or "regex"
 		Index      - If multiple pages match the given criteria, which one of them to return
-		Timeout    - Maximum number of seconds to wait for the page connection
 		fnCallback - A function to be called whenever message is received from the page
+		Timeout    - Maximum number of seconds to wait for the page connection
 	*/
-	GetPageBy(Key, Value, MatchMode:="exact", Index:=1, Timeout:=30, fnCallback:="", fnClose:="")
+	GetPageBy(Key, Value, MatchMode:="exact", Index:=1, fnCallback:="", fnClose:="", Timeout:=30)
 	{
 		Count := 0
 		for n, PageData in this.GetPageList()
@@ -219,24 +217,24 @@ class Chrome
 				|| (MatchMode = "startswith" && InStr(PageData[Key], Value) == 1)
 				|| (MatchMode = "regex" && PageData[Key] ~= Value))
 				&& ++Count == Index)
-				return new this.Page(PageData.webSocketDebuggerUrl, Timeout, fnCallback, fnClose)
+				return new this.Page(PageData.webSocketDebuggerUrl, fnCallback, fnClose, Timeout)
 		}
 	}
 	
 	/*
 		Shorthand for GetPageBy("url", Value, "startswith")
 	*/
-	GetPageByURL(Value, MatchMode:="startswith", Index:=1, Timeout:=30, fnCallback:="", fnClose:="")
+	GetPageByURL(Value, MatchMode:="startswith", Index:=1, fnCallback:="", fnClose:="", Timeout:=30)
 	{
-		return this.GetPageBy("url", Value, MatchMode, Index, Timeout, fnCallback, fnClose)
+		return this.GetPageBy("url", Value, MatchMode, Index, fnCallback, fnClose, Timeout)
 	}
 	
 	/*
 		Shorthand for GetPageBy("title", Value, "startswith")
 	*/
-	GetPageByTitle(Value, MatchMode:="startswith", Index:=1, Timeout:=30, fnCallback:="", fnClose:="")
+	GetPageByTitle(Value, MatchMode:="startswith", Index:=1, fnCallback:="", fnClose:="", Timeout:=30)
 	{
-		return this.GetPageBy("title", Value, MatchMode, Index, Timeout, fnCallback, fnClose)
+		return this.GetPageBy("title", Value, MatchMode, Index, fnCallback, fnClose, Timeout)
 	}
 	
 	/*
@@ -245,9 +243,9 @@ class Chrome
 		The default type to search for is "page", which is the visible area of
 		a normal Chrome tab.
 	*/
-	GetPage(Index:=1, Type:="page", Timeout:=30, fnCallback:="", fnClose:="")
+	GetPage(Index:=1, Type:="page", fnCallback:="", fnClose:="", Timeout:=30)
 	{
-		return this.GetPageBy("type", Type, "exact", Index, Timeout, fnCallback, fnClose)
+		return this.GetPageBy("type", Type, "exact", Index, fnCallback, fnClose, Timeout)
 	}
 	
 	/*
@@ -261,11 +259,11 @@ class Chrome
 		
 		/*
 			wsurl      - The desired page's WebSocket URL
-			timeout    - Maximum number of seconds to wait for the page connection
 			fnCallback - A function to be called whenever message is received
 			fnClose    - A function to be called whenever the page connection is lost
+			Timeout    - Maximum number of seconds to wait for the page connection
 		*/
-		__New(wsurl, timeout:=30, fnCallback:="", fnClose:="")
+		__New(wsurl, fnCallback:="", fnClose:="", Timeout:=30)
 		{
 			this.fnCallback := fnCallback
 			this.fnClose := fnClose
@@ -285,7 +283,7 @@ class Chrome
 			StartTime := A_TickCount
 			while !this.Connected
 			{
-				if (A_TickCount-StartTime > timeout*1000)
+				if (A_TickCount-StartTime > Timeout*1000)
 					throw Exception("Page connection timeout", -1)
 				else
 					Sleep, 50
