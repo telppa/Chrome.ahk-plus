@@ -1,6 +1,6 @@
 ﻿class Chrome
 {
-	static version := "1.3.0-git"
+	static version := "1.3.4-git"
 	
 	static DebugPort := 9222
 	
@@ -44,12 +44,19 @@
 	FindInstances()
 	{
 		static Needle := "--remote-debugging-port=(\d+)"
-		Out := {}
-		for Item in ComObjGet("winmgmts:")
-			.ExecQuery("SELECT CommandLine FROM Win32_Process"
-			. " WHERE Name = 'chrome.exe'")
-			if RegExMatch(Item.CommandLine, Needle, Match)
-				Out[Match1] := Item.CommandLine
+		
+		for k, v in ["chrome.exe", "msedge.exe"]
+		{
+			Out := {}
+			for Item in ComObjGet("winmgmts:")
+				.ExecQuery("SELECT CommandLine FROM Win32_Process"
+				. " WHERE Name = '" v "'")
+				if RegExMatch(Item.CommandLine, Needle, Match)
+					Out[Match1] := Item.CommandLine
+			
+			if (Out.MaxIndex())
+				break
+		}
 		return Out.MaxIndex() ? Out : False
 	}
 	
@@ -60,35 +67,54 @@
 		ChromePath  - Path to chrome.exe, will detect from start menu when left blank
 		DebugPort   - What port should Chrome's remote debugging server run on
 	*/
-	__New(ProfilePath:="", URLs:="about:blank", Flags:="", ChromePath:="", DebugPort:="")
+	__New(ProfilePath:="ChromeProfile", URLs:="about:blank", Flags:="", ChromePath:="", DebugPort:="")
 	{
+		if (ProfilePath == "")
+			throw Exception("Need a profile directory", -1)
 		; Verify ProfilePath
-		if (ProfilePath != "" && !InStr(FileExist(ProfilePath), "D"))
-			throw Exception("The given ProfilePath does not exist")
+		if (!InStr(FileExist(ProfilePath), "D"))
+		{
+			FileCreateDir, %ProfilePath%
+			if (ErrorLevel = 1)
+				throw Exception("Failed to create the profile directory", -1)
+		}
 		cc := DllCall("GetFullPathName", "str", ProfilePath, "uint", 0, "ptr", 0, "ptr", 0, "uint")
 		VarSetCapacity(buf, cc*(A_IsUnicode?2:1))
 		DllCall("GetFullPathName", "str", ProfilePath, "uint", cc, "str", buf, "ptr", 0, "uint")
 		this.ProfilePath := ProfilePath := buf
 		
+		; Try to find chrome or msedge path
+		if (ChromePath == "")
+		{
+			; Try to find chrome path
+			if !FileExist(ChromePath)
+				; By using winmgmts to get the path of a shortcut file we fix an edge case where the path is retreived incorrectly
+				; if using the ahk executable with a different architecture than the OS (using 32bit AHK on a 64bit OS for example)
+				try ChromePath := ComObjGet("winmgmts:").ExecQuery("Select * from Win32_ShortcutFile where Name=""" StrReplace(A_StartMenuCommon "\Programs\Google Chrome.lnk", "\", "\\") """").ItemIndex(0).Target
+			
+			if !FileExist(ChromePath)
+				RegRead, ChromePath, HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe
+			
+			; Try to find msedge path
+			if !FileExist(ChromePath)
+				try ChromePath := ComObjGet("winmgmts:").ExecQuery("Select * from Win32_ShortcutFile where Name=""" StrReplace(A_StartMenuCommon "\Programs\Microsoft Edge.lnk", "\", "\\") """").ItemIndex(0).Target
+			
+			if !FileExist(ChromePath)
+				RegRead ChromePath, HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe
+		}
+		
 		; Verify ChromePath
-		if (ChromePath == "")
-			; By using winmgmts to get the path of a shortcut file we fix an edge case where the path is retreived incorrectly
-			; if using the ahk executable with a different architecture than the OS (using 32bit AHK on a 64bit OS for example)
-			 ChromePath := ComObjGet("winmgmts:").ExecQuery("Select * from Win32_ShortcutFile where Name=""" StrReplace(A_StartMenuCommon "\Programs\Google Chrome.lnk", "\", "\\") """").ItemIndex(0).Target
-			; FileGetShortcut, %A_StartMenuCommon%\Programs\Google Chrome.lnk, ChromePath
-		if (ChromePath == "")
-			RegRead, ChromePath, HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe
 		if !FileExist(ChromePath)
-			throw Exception("Chrome could not be found")
+			throw Exception("Chrome and Edge could not be found", -1)
 		this.ChromePath := ChromePath
 		
 		; Verify DebugPort
 		if (DebugPort != "")
 		{
 			if DebugPort is not integer
-				throw Exception("DebugPort must be a positive integer")
+				throw Exception("DebugPort must be a positive integer", -1)
 			else if (DebugPort <= 0)
-				throw Exception("DebugPort must be a positive integer")
+				throw Exception("DebugPort must be a positive integer", -1)
 			this.DebugPort := DebugPort
 		}
 		
@@ -120,11 +146,28 @@
 		In addition to standard tabs, these include pages such as extension
 		configuration pages.
 	*/
-	GetPageList()
+	GetPageList(Timeout:=30)
 	{
 		http := ComObjCreate("WinHttp.WinHttpRequest.5.1")
-		http.open("GET", "http://127.0.0.1:" this.DebugPort "/json")
-		http.send()
+		StartTime := A_TickCount
+		loop
+		{
+			; It is easy to fail here because "new chrome()" takes a long time to execute.
+			; Therefore, it will be tried again and again within 30 seconds until it succeeds or timeout.
+			if (A_TickCount-StartTime > Timeout*1000)
+				throw Exception("Get page list timeout", -1)
+			else
+				try
+				{
+					http.Open("GET", "http://127.0.0.1:" this.DebugPort "/json", true)
+					http.Send()
+					http.WaitForResponse(-1)
+					if (http.Status = 200)
+						break
+				}
+			
+			Sleep, 50
+		}
 		return this.JSON.Load(http.responseText)
 	}
 	
@@ -137,36 +180,37 @@
 		Value      - The value to search for in the provided key
 		MatchMode  - What kind of search to use, such as "exact", "contains", "startswith", or "regex"
 		Index      - If multiple pages match the given criteria, which one of them to return
+		Timeout    - Maximum number of seconds to wait for the page connection
 		fnCallback - A function to be called whenever message is received from the page
 	*/
-	GetPageBy(Key, Value, MatchMode:="exact", Index:=1, fnCallback:="", fnClose:="")
+	GetPageBy(Key, Value, MatchMode:="exact", Index:=1, Timeout:=30, fnCallback:="", fnClose:="")
 	{
 		Count := 0
 		for n, PageData in this.GetPageList()
 		{
 			if (((MatchMode = "exact" && PageData[Key] = Value) ; Case insensitive
-			|| (MatchMode = "contains" && InStr(PageData[Key], Value))
-			|| (MatchMode = "startswith" && InStr(PageData[Key], Value) == 1)
-			|| (MatchMode = "regex" && PageData[Key] ~= Value))
-			&& ++Count == Index)
-				return new this.Page(PageData.webSocketDebuggerUrl, fnCallback, fnClose)
+				|| (MatchMode = "contains" && InStr(PageData[Key], Value))
+				|| (MatchMode = "startswith" && InStr(PageData[Key], Value) == 1)
+				|| (MatchMode = "regex" && PageData[Key] ~= Value))
+				&& ++Count == Index)
+				return new this.Page(PageData.webSocketDebuggerUrl, Timeout, fnCallback, fnClose)
 		}
 	}
 	
 	/*
 		Shorthand for GetPageBy("url", Value, "startswith")
 	*/
-	GetPageByURL(Value, MatchMode:="startswith", Index:=1, fnCallback:="", fnClose:="")
+	GetPageByURL(Value, MatchMode:="startswith", Index:=1, Timeout:=30, fnCallback:="", fnClose:="")
 	{
-		return this.GetPageBy("url", Value, MatchMode, Index, fnCallback, fnClose)
+		return this.GetPageBy("url", Value, MatchMode, Index, Timeout, fnCallback, fnClose)
 	}
 	
 	/*
 		Shorthand for GetPageBy("title", Value, "startswith")
 	*/
-	GetPageByTitle(Value, MatchMode:="startswith", Index:=1, fnCallback:="", fnClose:="")
+	GetPageByTitle(Value, MatchMode:="startswith", Index:=1, Timeout:=30, fnCallback:="", fnClose:="")
 	{
-		return this.GetPageBy("title", Value, MatchMode, Index, fnCallback, fnClose)
+		return this.GetPageBy("title", Value, MatchMode, Index, Timeout, fnCallback, fnClose)
 	}
 	
 	/*
@@ -175,9 +219,9 @@
 		The default type to search for is "page", which is the visible area of
 		a normal Chrome tab.
 	*/
-	GetPage(Index:=1, Type:="page", fnCallback:="", fnClose:="")
+	GetPage(Index:=1, Type:="page", Timeout:=30, fnCallback:="", fnClose:="")
 	{
-		return this.GetPageBy("type", Type, "exact", Index, fnCallback, fnClose)
+		return this.GetPageBy("type", Type, "exact", Index, Timeout, fnCallback, fnClose)
 	}
 	
 	/*
@@ -191,24 +235,35 @@
 		
 		/*
 			wsurl      - The desired page's WebSocket URL
+			timeout    - Maximum number of seconds to wait for the page connection
 			fnCallback - A function to be called whenever message is received
 			fnClose    - A function to be called whenever the page connection is lost
 		*/
-		__New(wsurl, fnCallback:="", fnClose:="")
+		__New(wsurl, timeout:=30, fnCallback:="", fnClose:="")
 		{
 			this.fnCallback := fnCallback
 			this.fnClose := fnClose
+			; Here is no waiting for a response so no need to add a timeout
 			this.BoundKeepAlive := this.Call.Bind(this, "Browser.getVersion",, False)
 			
 			; TODO: Throw exception on invalid objects
 			if IsObject(wsurl)
 				wsurl := wsurl.webSocketDebuggerUrl
 			
+			RegExMatch(wsurl, "page/(.+)", targetId)
+			this.targetId := targetId1
 			ws := {"base": this.WebSocket, "_Event": this.Event, "Parent": this}
 			this.ws := new ws(wsurl)
 			
+			; The timeout here is perhaps duplicated with the previous line
+			StartTime := A_TickCount
 			while !this.Connected
-				Sleep, 50
+			{
+				if (A_TickCount-StartTime > timeout*1000)
+					throw Exception("Page connection timeout", -1)
+				else
+					Sleep, 50
+			}
 		}
 		
 		/*
@@ -230,11 +285,13 @@
 			WaitForResponse - Whether to block until a response is received from
 				Chrome, which is necessary to receive a return value, or whether
 				to continue on with the script without waiting for a response.
+			
+			Timeout - Maximum number of seconds to wait for a response.
 		*/
-		Call(DomainAndMethod, Params:="", WaitForResponse:=True)
+		Call(DomainAndMethod, Params:="", WaitForResponse:=True, Timeout:=30)
 		{
 			if !this.Connected
-				throw Exception("Not connected to tab")
+				throw Exception("Not connected to tab", -1)
 			
 			; Use a temporary variable for ID in case more calls are made
 			; before we receive a response.
@@ -248,8 +305,14 @@
 			
 			; Wait for the response
 			this.responses[ID] := False
+			StartTime := A_TickCount
 			while !this.responses[ID]
-				Sleep, 50
+			{
+				if (A_TickCount-StartTime > Timeout*1000)
+					throw Exception(DomainAndMethod " response timeout", -1)
+				else
+					Sleep, 10
+			}
 			
 			; Get the response, check if it's an error
 			response := this.responses.Delete(ID)
@@ -265,7 +328,7 @@
 			PageInst.Evaluate("alert(""I can't believe it's not IE!"");")
 			PageInst.Evaluate("document.getElementsByTagName('button')[0].click();")
 		*/
-		Evaluate(JS)
+		Evaluate(JS, Timeout:=30)
 		{
 			response := this.Call("Runtime.evaluate",
 			( LTrim Join
@@ -278,7 +341,7 @@
 				"userGesture": Chrome.JSON.True,
 				"awaitPromise": Chrome.JSON.False
 			}
-			))
+			), , Timeout)
 			
 			if (response.exceptionDetails)
 				throw Exception(response.result.description, -1
@@ -293,11 +356,18 @@
 			
 			DesiredState - The state to wait for the page's ReadyState to match
 			Interval     - How often it should check whether the state matches
+			Timeout      - Maximum number of seconds to wait for the page's ReadyState to match
 		*/
-		WaitForLoad(DesiredState:="complete", Interval:=100)
+		WaitForLoad(DesiredState:="complete", Interval:=100, Timeout:=30)
 		{
+			StartTime := A_TickCount
 			while this.Evaluate("document.readyState").value != DesiredState
-				Sleep, Interval
+			{
+				if (A_TickCount-StartTime > Timeout*1000)
+					throw Exception("Wait for page " DesiredState " timeout", -1)
+				else
+					Sleep, Interval
+			}
 		}
 		
 		/*
