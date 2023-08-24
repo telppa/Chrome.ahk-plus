@@ -3,13 +3,13 @@
 Automate Google Chrome and MS Edge using native AutoHotkey.
 
 
-## Difference between Chrome.ahk-plus and Chrome.ahk
-**Google Chrome** and **Microsoft Edge** are supported.
-Error reports directed to user code instead of library code.
-Added 30-seconds timeout for all funtions that could cause a dead loop.
-Simplified creation of ProfilePath.
-Fixed an issue that Chrome to report error due to slow opening.
-Fixed an issue that Chrome to report error due to shortcuts were not found.
+## What has been enhanced compared to Chrome.ahk
+* **Google Chrome** and **Microsoft Edge** are supported.
+* Error reports directed to user code instead of library code.
+* Added 30-seconds timeout for all funtions that could cause a dead loop.
+* Simplified creation of ProfilePath.
+* Fixed an issue that Chrome to report error due to slow opening.
+* Fixed an issue that Chrome to report error due to shortcuts were not found.
 
 ## How it works
 
