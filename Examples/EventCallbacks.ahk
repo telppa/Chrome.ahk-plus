@@ -71,7 +71,7 @@ Loop, %TestPages%
 	BoundCallback := Func("Callback").Bind(A_Index)
 	
 	; Get an instance of the page, passing in the callback function
-	if !(PageInst := ChromeInst.GetPageByTitle(A_Index, "contains",,, BoundCallback))
+	if !(PageInst := ChromeInst.GetPageByTitle(A_Index, "contains",, BoundCallback))
 	{
 		MsgBox, Could not retrieve page %A_Index%!
 		ChromeInst.Kill()
