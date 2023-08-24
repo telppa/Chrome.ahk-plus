@@ -1,7 +1,15 @@
-# Chrome.ahk
+# Chrome.ahk-plus
 
-Automate Google Chrome using native AutoHotkey.
+Automate Google Chrome and MS Edge using native AutoHotkey.
 
+
+## Difference between Chrome.ahk-plus and Chrome.ahk
+**Google Chrome** and **Microsoft Edge** are supported.
+Error reports directed to user code instead of library code.
+Added 30-seconds timeout for all funtions that could cause a dead loop.
+Simplified creation of ProfilePath.
+Fixed an issue that Chrome to report error due to slow opening.
+Fixed an issue that Chrome to report error due to shortcuts were not found.
 
 ## How it works
 
@@ -51,7 +59,6 @@ Once an instance of the class `Chrome` has been created, Google Chrome will be l
 
 ; Create an instance of the Chrome class using
 ; the folder ChromeProfile to store the user profile
-FileCreateDir, ChromeProfile
 ChromeInst := new Chrome("ChromeProfile")
 
 ; Connect to the newly opened tab and navigate to another website
