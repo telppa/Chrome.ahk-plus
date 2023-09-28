@@ -89,3 +89,5 @@ return
 ```
 
 **You can find more sample code showing how to use this library in the Examples folder.**
+
+Examples 目录下有更多示例。
