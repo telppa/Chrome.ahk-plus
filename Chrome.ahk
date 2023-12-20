@@ -534,13 +534,13 @@ class Chrome
 				? "i1QkDIPsDIH6AAAIAHQIgfoAAAAEdTWLTCQUiwGJBCSLRCQQiUQkBItEJByJRCQIM8CB+gAACAAPlMBQjUQkBFD/cQyLQQj/cQT/0IPEDMIUAA=="
 				: "SIPsSEyL0kGB+AAACAB0CUGB+AAAAAR1MEiLAotSGEyJTCQwRTPJQYH4AAAIAEiJTCQoSYtKCEyNRCQgQQ+UwUiJRCQgQf9SEEiDxEjD"
 				if !DllCall("crypt32\CryptStringToBinary", "Str", b64, "UInt", 0, "UInt", 1, "Ptr", 0, "UInt*", s := 0, "Ptr", 0, "Ptr", 0)
-					throw Exception("failed to parse b64 to binary", -1)
+					throw Exception("failed to parse b64 to binary")
 				ObjSetCapacity(this, "code", s)
 				this.pCode := ObjGetAddress(this, "code")
 				if !DllCall("crypt32\CryptStringToBinary", "Str", b64, "UInt", 0, "UInt", 1, "Ptr", this.pCode, "UInt*", s, "Ptr", 0, "Ptr", 0) &&
-					throw Exception("failed to convert b64 to binary", -1)
+					throw Exception("failed to convert b64 to binary")
 				if !DllCall("VirtualProtect", "Ptr", this.pCode, "UInt", s, "UInt", 0x40, "UInt*", 0)
-					throw Exception("failed to mark memory as executable", -1)
+					throw Exception("failed to mark memory as executable")
 				return this.pCode
 				/* c++ source
 					struct __CONTEXT {
@@ -606,7 +606,7 @@ class Chrome
 				
 				; Parse the url
 				if !RegExMatch(url, "Oi)^((?<SCHEME>wss?)://)?((?<USERNAME>[^:]+):(?<PASSWORD>.+)@)?(?<HOST>[^/:]+)(:(?<PORT>\d+))?(?<PATH>/.*)?$", m)
-					throw Exception("Invalid websocket url", -1)
+					throw Exception("Invalid websocket url")
 				this.m := m
 				
 				; Open a new HTTP API instance
@@ -617,7 +617,7 @@ class Chrome
 					, "Ptr", 0  ; [in]                  LPCWSTR pszProxyBypassW
 					, "UInt", async * 0x10000000 ; [in] DWORD   dwFlags
 					, "Ptr")) ; HINTERNET
-					throw Exception("WinHttpOpen failed: " this._LastError(), -1)
+					throw Exception("WinHttpOpen failed: " this._LastError())
 				this.HINTERNETs.Push(hSession)
 				
 				; Connect the HTTP API to the remote host
@@ -628,7 +628,7 @@ class Chrome
 					, "UShort", port  ; [in] INTERNET_PORT nServerPort
 					, "UInt", 0       ; [in] DWORD         dwReserved
 					, "Ptr")) ; HINTERNET
-					throw Exception("WinHttpConnect failed: " this._LastError(), -1)
+					throw Exception("WinHttpConnect failed: " this._LastError())
 				this.HINTERNETs.Push(this.hConnect)
 				
 				; Translate headers from array to string
@@ -660,7 +660,7 @@ class Chrome
 				
 				; If the HTTP connection is closed, we cannot request a websocket
 				if !this.HINTERNETs.Length()
-					throw Exception("The connection is closed", -1)
+					throw Exception("The connection is closed")
 				
 				; Shutdown any existing websocket connection
 				this.shutdown()
@@ -680,7 +680,7 @@ class Chrome
 					, "Ptr", 0             ; [in] LPCWSTR   *ppwszAcceptTypes,
 					, "UInt", dwFlags      ; [in] DWORD     dwFlags
 					, "Ptr")) ; HINTERNET
-					throw Exception("WinHttpOpenRequest failed: " this._LastError(), -1)
+					throw Exception("WinHttpOpenRequest failed: " this._LastError())
 				this.HINTERNETs.Push(hRequest)
 				
 				if this.headers
@@ -691,7 +691,7 @@ class Chrome
 						, "UInt", -1           ; [in] DWORD     dwHeadersLength,
 						, "UInt", 0x20000000   ; [in] DWORD     dwModifiers
 						, "Int") ; BOOL
-						throw Exception("WinHttpAddRequestHeaders failed: " this._LastError(), -1)
+						throw Exception("WinHttpAddRequestHeaders failed: " this._LastError())
 				}
 				
 				; Make the HTTP Request
@@ -701,11 +701,11 @@ class Chrome
 					|| !DllCall("Winhttp\WinHttpReceiveResponse", "Ptr", hRequest, "Ptr", 0)
 					|| !DllCall("Winhttp\WinHttpQueryHeaders", "Ptr", hRequest, "UInt", 19, "Ptr", 0, "WStr", status, "UInt*", 10, "Ptr", 0, "Int")
 					|| status != "101")
-					throw Exception("Invalid status: " status, -1)
+					throw Exception("Invalid status: " status)
 				
 				; Upgrade the HTTP Request to a Websocket connection
 				if !(this.Ptr := DllCall("Winhttp\WinHttpWebSocketCompleteUpgrade", "Ptr", hRequest, "Ptr", 0))
-					throw Exception("WinHttpWebSocketCompleteUpgrade failed: " this._LastError(), -1)
+					throw Exception("WinHttpWebSocketCompleteUpgrade failed: " this._LastError())
 				
 				; Close the HTTP Request, save the Websocket connection
 				DllCall("Winhttp\WinHttpCloseHandle", "Ptr", this.HINTERNETs.Pop())
@@ -729,7 +729,7 @@ class Chrome
 						, "Ptr*", pCtx      ; [in] LPVOID    lpBuffer
 						, "UInt", A_PtrSize ; [in] DWORD     dwBufferLength
 						, "Int") ; BOOL
-						throw Exception("WinHttpSetOption failed: " this._LastError(), -1)
+						throw Exception("WinHttpSetOption failed: " this._LastError())
 					
 					StatusCallback := this._StatusSyncCallback()
 					if (-1 == DllCall("Winhttp\WinHttpSetStatusCallback"
@@ -738,7 +738,7 @@ class Chrome
 						, "UInt", 0x80000       ; [in] DWORD                   dwNotificationFlags,
 						, "UPtr", 0             ; [in] DWORD_PTR               dwReserved
 						, "Ptr")) ; WINHTTP_STATUS_CALLBACK
-						throw Exception("WinHttpSetStatusCallback failed: " this._LastError(), -1)
+						throw Exception("WinHttpSetStatusCallback failed: " this._LastError())
 					
 					; Make the initial request for data to receive an asynchronous response for
 					if (ret := DllCall("Winhttp\WinHttpWebSocketReceive"
@@ -748,7 +748,7 @@ class Chrome
 						, "UInt*", 0             ; [out] DWORD                          *pdwBytesRead,
 						, "UInt*", 0             ; [out] WINHTTP_WEB_SOCKET_BUFFER_TYPE *peBufferType
 						, "UInt")) ; DWORD
-						throw Exception("WinHttpWebSocketReceive failed: " ret, -1)
+						throw Exception("WinHttpWebSocketReceive failed: " ret)
 				}
 				
 				; Fire the open event
@@ -915,7 +915,7 @@ class Chrome
 			; eBufferType BINARY_MESSAGE = 0, BINARY_FRAGMENT = 1, UTF8_MESSAGE = 2, UTF8_FRAGMENT = 3
 			sendRaw(eBufferType, pvBuffer, dwBufferLength) {
 				if (this.readyState != 1)
-					throw Exception("websocket is disconnected", -1)
+					throw Exception("websocket is disconnected")
 				if (ret := DllCall("Winhttp\WinHttpWebSocketSend"
 					, "Ptr", this.Ptr        ; [in] HINTERNET                      hWebSocket
 					, "UInt", eBufferType    ; [in] WINHTTP_WEB_SOCKET_BUFFER_TYPE eBufferType
@@ -941,9 +941,9 @@ class Chrome
 			receive()
 			{
 				if (this.async)
-					throw Exception("Used only in synchronous mode", -1)
+					throw Exception("Used only in synchronous mode")
 				if (this.readyState != 1)
-					throw Exception("websocket is disconnected", -1)
+					throw Exception("websocket is disconnected")
 				
 				rec := {data: "", size: 0, ptr: 0}
 				
