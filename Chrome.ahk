@@ -1,4 +1,4 @@
-﻿; Chrome.ahk-plus v1.3.5
+﻿; Chrome.ahk-plus v1.3.6
 ; https://github.com/telppa/Chrome.ahk-plus
 
 ; 基于 GeekDude 2023.03.21 Release 版修改，与 GeekDude 版相比有以下增强。
@@ -9,7 +9,7 @@
 ; 修复了 Chrome 打开缓慢而报错的问题。
 ; 修复了找不到开始菜单中的 Chrome 快捷方式而报错的问题。
 
-; pageinst.call() 支持的参数与命令行支持的参数
+; page.Call() 支持的参数与命令行支持的参数
 ; https://chromedevtools.github.io/devtools-protocol/tot/Browser/
 ; https://peter.sh/experiments/chromium-command-line-switches/
 
@@ -24,7 +24,7 @@
 
 class Chrome
 {
-	static version := "1.3.5"
+	static version := "1.3.6"
 	
 	static DebugPort := 9222
 	
@@ -179,7 +179,7 @@ class Chrome
 			; It is easy to fail here because "new chrome()" takes a long time to execute.
 			; Therefore, it will be tried again and again within 30 seconds until it succeeds or timeout.
 			if (A_TickCount-StartTime > Timeout*1000)
-				throw Exception("Get page list timeout", -1)
+				throw Exception("Get page list timeout")
 			else
 				try
 				{
@@ -190,7 +190,7 @@ class Chrome
 						break
 				}
 			
-			Sleep, 50
+			Sleep 50
 		}
 		return this.JSON.Load(http.responseText)
 	}
@@ -209,16 +209,21 @@ class Chrome
 	*/
 	GetPageBy(Key, Value, MatchMode:="exact", Index:=1, fnCallback:="", fnClose:="", Timeout:=30)
 	{
-		Count := 0
-		for n, PageData in this.GetPageList()
+		try
 		{
-			if (((MatchMode = "exact" && PageData[Key] = Value) ; Case insensitive
-				|| (MatchMode = "contains" && InStr(PageData[Key], Value))
-				|| (MatchMode = "startswith" && InStr(PageData[Key], Value) == 1)
-				|| (MatchMode = "regex" && PageData[Key] ~= Value))
-				&& ++Count == Index)
-				return new this.Page(PageData.webSocketDebuggerUrl, fnCallback, fnClose, Timeout)
+			Count := 0
+			for n, PageData in this.GetPageList()
+			{
+				if (((MatchMode = "exact" && PageData[Key] = Value) ; Case insensitive
+					|| (MatchMode = "contains" && InStr(PageData[Key], Value))
+					|| (MatchMode = "startswith" && InStr(PageData[Key], Value) == 1)
+					|| (MatchMode = "regex" && PageData[Key] ~= Value))
+					&& ++Count == Index)
+					return new this.Page(PageData.webSocketDebuggerUrl, fnCallback, fnClose, Timeout)
+			}
 		}
+		catch e
+			throw Exception(e.Message, -1)
 	}
 	
 	/*
@@ -226,7 +231,10 @@ class Chrome
 	*/
 	GetPageByURL(Value, MatchMode:="startswith", Index:=1, fnCallback:="", fnClose:="", Timeout:=30)
 	{
-		return this.GetPageBy("url", Value, MatchMode, Index, fnCallback, fnClose, Timeout)
+		try
+			return this.GetPageBy("url", Value, MatchMode, Index, fnCallback, fnClose, Timeout)
+		catch e
+			throw Exception(e.Message, -1)
 	}
 	
 	/*
@@ -234,7 +242,10 @@ class Chrome
 	*/
 	GetPageByTitle(Value, MatchMode:="startswith", Index:=1, fnCallback:="", fnClose:="", Timeout:=30)
 	{
-		return this.GetPageBy("title", Value, MatchMode, Index, fnCallback, fnClose, Timeout)
+		try
+			return this.GetPageBy("title", Value, MatchMode, Index, fnCallback, fnClose, Timeout)
+		catch e
+			throw Exception(e.Message, -1)
 	}
 	
 	/*
@@ -245,7 +256,10 @@ class Chrome
 	*/
 	GetPage(Index:=1, Type:="page", fnCallback:="", fnClose:="", Timeout:=30)
 	{
-		return this.GetPageBy("type", Type, "exact", Index, fnCallback, fnClose, Timeout)
+		try
+			return this.GetPageBy("type", Type, "exact", Index, fnCallback, fnClose, Timeout)
+		catch e
+			throw Exception(e.Message, -1)
 	}
 	
 	/*
@@ -284,9 +298,9 @@ class Chrome
 			while !this.Connected
 			{
 				if (A_TickCount-StartTime > Timeout*1000)
-					throw Exception("Page connection timeout", -1)
+					throw Exception("Page connection timeout")
 				else
-					Sleep, 50
+					Sleep 50
 			}
 		}
 		
@@ -303,7 +317,7 @@ class Chrome
 				endpoint. For example:
 				PageInst.Call("Page.printToPDF", {"scale": 0.5 ; Numeric Value
 					, "landscape": Chrome.JSON.True() ; Boolean Value
-					, "pageRanges: "1-5, 8, 11-13"}) ; String value
+					, "pageRanges: "1-5, 8, 11-13"}) ; String Value
 				PageInst.Call("Page.navigate", {"url": "https://autohotkey.com/"})
 			
 			WaitForResponse - Whether to block until a response is received from
@@ -335,7 +349,7 @@ class Chrome
 				if (A_TickCount-StartTime > Timeout*1000)
 					throw Exception(DomainAndMethod " response timeout", -1)
 				else
-					Sleep, 10
+					Sleep 10
 			}
 			
 			; Get the response, check if it's an error
@@ -354,25 +368,30 @@ class Chrome
 		*/
 		Evaluate(JS, Timeout:=30)
 		{
-			response := this.Call("Runtime.evaluate",
-			( LTrim Join
+			try
 			{
-				"expression": JS,
-				"objectGroup": "console",
-				"includeCommandLineAPI": Chrome.JSON.True,
-				"silent": Chrome.JSON.False,
-				"returnByValue": Chrome.JSON.False,
-				"userGesture": Chrome.JSON.True,
-				"awaitPromise": Chrome.JSON.False
+				response := this.Call("Runtime.evaluate",
+				( LTrim Join
+				{
+					"expression": JS,
+					"objectGroup": "console",
+					"includeCommandLineAPI": Chrome.JSON.True,
+					"silent": Chrome.JSON.False,
+					"returnByValue": Chrome.JSON.False,
+					"userGesture": Chrome.JSON.True,
+					"awaitPromise": Chrome.JSON.False
+				}
+				), , Timeout)
+				
+				if (response.exceptionDetails)
+					throw Exception(response.result.description, -1
+						, Chrome.JSON.Dump({"Code": JS
+						, "exceptionDetails": response.exceptionDetails}))
+				
+				return response.result
 			}
-			), , Timeout)
-			
-			if (response.exceptionDetails)
-				throw Exception(response.result.description, -1
-					, Chrome.JSON.Dump({"Code": JS
-					, "exceptionDetails": response.exceptionDetails}))
-			
-			return response.result
+			catch e
+				throw Exception(e.Message, -1)
 		}
 		
 		/*
@@ -384,14 +403,19 @@ class Chrome
 		*/
 		WaitForLoad(DesiredState:="complete", Interval:=100, Timeout:=30)
 		{
-			StartTime := A_TickCount
-			while this.Evaluate("document.readyState").value != DesiredState
+			try
 			{
-				if (A_TickCount-StartTime > Timeout*1000)
-					throw Exception("Wait for page " DesiredState " timeout", -1)
-				else
-					Sleep, Interval
+				StartTime := A_TickCount
+				while this.Evaluate("document.readyState").value != DesiredState
+				{
+					if (A_TickCount-StartTime > Timeout*1000)
+						throw Exception("Wait for page " DesiredState " timeout", -1)
+					else
+						Sleep Interval
+				}
 			}
+			catch e
+				throw Exception(e.Message, -1)
 		}
 		
 		/*
@@ -406,7 +430,7 @@ class Chrome
 			
 			if (EventName == "Error")
 			{
-				throw Exception("Error: " Event.code)
+				throw Exception("Error: " Event.code, -1)
 			}
 			else if (EventName == "Open")
 			{
@@ -510,13 +534,13 @@ class Chrome
 				? "i1QkDIPsDIH6AAAIAHQIgfoAAAAEdTWLTCQUiwGJBCSLRCQQiUQkBItEJByJRCQIM8CB+gAACAAPlMBQjUQkBFD/cQyLQQj/cQT/0IPEDMIUAA=="
 				: "SIPsSEyL0kGB+AAACAB0CUGB+AAAAAR1MEiLAotSGEyJTCQwRTPJQYH4AAAIAEiJTCQoSYtKCEyNRCQgQQ+UwUiJRCQgQf9SEEiDxEjD"
 				if !DllCall("crypt32\CryptStringToBinary", "Str", b64, "UInt", 0, "UInt", 1, "Ptr", 0, "UInt*", s := 0, "Ptr", 0, "Ptr", 0)
-					throw Exception("failed to parse b64 to binary")
+					throw Exception("failed to parse b64 to binary", -1)
 				ObjSetCapacity(this, "code", s)
 				this.pCode := ObjGetAddress(this, "code")
 				if !DllCall("crypt32\CryptStringToBinary", "Str", b64, "UInt", 0, "UInt", 1, "Ptr", this.pCode, "UInt*", s, "Ptr", 0, "Ptr", 0) &&
-					throw Exception("failed to convert b64 to binary")
+					throw Exception("failed to convert b64 to binary", -1)
 				if !DllCall("VirtualProtect", "Ptr", this.pCode, "UInt", s, "UInt", 0x40, "UInt*", 0)
-					throw Exception("failed to mark memory as executable")
+					throw Exception("failed to mark memory as executable", -1)
 				return this.pCode
 				/* c++ source
 					struct __CONTEXT {
@@ -582,7 +606,7 @@ class Chrome
 				
 				; Parse the url
 				if !RegExMatch(url, "Oi)^((?<SCHEME>wss?)://)?((?<USERNAME>[^:]+):(?<PASSWORD>.+)@)?(?<HOST>[^/:]+)(:(?<PORT>\d+))?(?<PATH>/.*)?$", m)
-					throw Exception("Invalid websocket url")
+					throw Exception("Invalid websocket url", -1)
 				this.m := m
 				
 				; Open a new HTTP API instance
@@ -593,7 +617,7 @@ class Chrome
 					, "Ptr", 0  ; [in]                  LPCWSTR pszProxyBypassW
 					, "UInt", async * 0x10000000 ; [in] DWORD   dwFlags
 					, "Ptr")) ; HINTERNET
-					throw Exception("WinHttpOpen failed: " this._LastError())
+					throw Exception("WinHttpOpen failed: " this._LastError(), -1)
 				this.HINTERNETs.Push(hSession)
 				
 				; Connect the HTTP API to the remote host
@@ -604,7 +628,7 @@ class Chrome
 					, "UShort", port  ; [in] INTERNET_PORT nServerPort
 					, "UInt", 0       ; [in] DWORD         dwReserved
 					, "Ptr")) ; HINTERNET
-					throw Exception("WinHttpConnect failed: " this._LastError())
+					throw Exception("WinHttpConnect failed: " this._LastError(), -1)
 				this.HINTERNETs.Push(this.hConnect)
 				
 				; Translate headers from array to string
@@ -636,7 +660,7 @@ class Chrome
 				
 				; If the HTTP connection is closed, we cannot request a websocket
 				if !this.HINTERNETs.Length()
-					throw Exception("The connection is closed")
+					throw Exception("The connection is closed", -1)
 				
 				; Shutdown any existing websocket connection
 				this.shutdown()
@@ -656,7 +680,7 @@ class Chrome
 					, "Ptr", 0             ; [in] LPCWSTR   *ppwszAcceptTypes,
 					, "UInt", dwFlags      ; [in] DWORD     dwFlags
 					, "Ptr")) ; HINTERNET
-					throw Exception("WinHttpOpenRequest failed: " this._LastError())
+					throw Exception("WinHttpOpenRequest failed: " this._LastError(), -1)
 				this.HINTERNETs.Push(hRequest)
 				
 				if this.headers
@@ -667,7 +691,7 @@ class Chrome
 						, "UInt", -1           ; [in] DWORD     dwHeadersLength,
 						, "UInt", 0x20000000   ; [in] DWORD     dwModifiers
 						, "Int") ; BOOL
-						throw Exception("WinHttpAddRequestHeaders failed: " this._LastError())
+						throw Exception("WinHttpAddRequestHeaders failed: " this._LastError(), -1)
 				}
 				
 				; Make the HTTP Request
@@ -677,11 +701,11 @@ class Chrome
 					|| !DllCall("Winhttp\WinHttpReceiveResponse", "Ptr", hRequest, "Ptr", 0)
 					|| !DllCall("Winhttp\WinHttpQueryHeaders", "Ptr", hRequest, "UInt", 19, "Ptr", 0, "WStr", status, "UInt*", 10, "Ptr", 0, "Int")
 					|| status != "101")
-					throw Exception("Invalid status: " status)
+					throw Exception("Invalid status: " status, -1)
 				
 				; Upgrade the HTTP Request to a Websocket connection
 				if !(this.Ptr := DllCall("Winhttp\WinHttpWebSocketCompleteUpgrade", "Ptr", hRequest, "Ptr", 0))
-					throw Exception("WinHttpWebSocketCompleteUpgrade failed: " this._LastError())
+					throw Exception("WinHttpWebSocketCompleteUpgrade failed: " this._LastError(), -1)
 				
 				; Close the HTTP Request, save the Websocket connection
 				DllCall("Winhttp\WinHttpCloseHandle", "Ptr", this.HINTERNETs.Pop())
@@ -705,7 +729,7 @@ class Chrome
 						, "Ptr*", pCtx      ; [in] LPVOID    lpBuffer
 						, "UInt", A_PtrSize ; [in] DWORD     dwBufferLength
 						, "Int") ; BOOL
-						throw Exception("WinHttpSetOption failed: " this._LastError())
+						throw Exception("WinHttpSetOption failed: " this._LastError(), -1)
 					
 					StatusCallback := this._StatusSyncCallback()
 					if (-1 == DllCall("Winhttp\WinHttpSetStatusCallback"
@@ -714,7 +738,7 @@ class Chrome
 						, "UInt", 0x80000       ; [in] DWORD                   dwNotificationFlags,
 						, "UPtr", 0             ; [in] DWORD_PTR               dwReserved
 						, "Ptr")) ; WINHTTP_STATUS_CALLBACK
-						throw Exception("WinHttpSetStatusCallback failed: " this._LastError())
+						throw Exception("WinHttpSetStatusCallback failed: " this._LastError(), -1)
 					
 					; Make the initial request for data to receive an asynchronous response for
 					if (ret := DllCall("Winhttp\WinHttpWebSocketReceive"
@@ -724,7 +748,7 @@ class Chrome
 						, "UInt*", 0             ; [out] DWORD                          *pdwBytesRead,
 						, "UInt*", 0             ; [out] WINHTTP_WEB_SOCKET_BUFFER_TYPE *peBufferType
 						, "UInt")) ; DWORD
-						throw Exception("WinHttpWebSocketReceive failed: " ret)
+						throw Exception("WinHttpWebSocketReceive failed: " ret, -1)
 				}
 				
 				; Fire the open event
@@ -891,7 +915,7 @@ class Chrome
 			; eBufferType BINARY_MESSAGE = 0, BINARY_FRAGMENT = 1, UTF8_MESSAGE = 2, UTF8_FRAGMENT = 3
 			sendRaw(eBufferType, pvBuffer, dwBufferLength) {
 				if (this.readyState != 1)
-					throw Exception("websocket is disconnected")
+					throw Exception("websocket is disconnected", -1)
 				if (ret := DllCall("Winhttp\WinHttpWebSocketSend"
 					, "Ptr", this.Ptr        ; [in] HINTERNET                      hWebSocket
 					, "UInt", eBufferType    ; [in] WINHTTP_WEB_SOCKET_BUFFER_TYPE eBufferType
@@ -917,9 +941,9 @@ class Chrome
 			receive()
 			{
 				if (this.async)
-					throw Exception("Used only in synchronous mode")
+					throw Exception("Used only in synchronous mode", -1)
 				if (this.readyState != 1)
-					throw Exception("websocket is disconnected")
+					throw Exception("websocket is disconnected", -1)
 				
 				rec := {data: "", size: 0, ptr: 0}
 				
@@ -1196,7 +1220,7 @@ class Chrome
 			. "dxIKdxYx8AAE6ZcH0fAAAekWh/AABBRkoQJZ4GYSsACD+14Ph7L+/4D/6Wn///+QBgA="
 			static Code := false
 			if ((A_PtrSize * 8) != 32) {
-				Throw Exception("_LoadLib32Bit does not support " (A_PtrSize * 8) " bit AHK, please run using 32 bit AHK")
+				Throw Exception("_LoadLib32Bit does not support " (A_PtrSize * 8) " bit AHK, please run using 32 bit AHK", -1)
 			}
 			; MCL standalone loader https://github.com/G33kDude/MCLib.ahk
 			; Copyright (c) 2021 G33kDude, CloakerSmoker (CC-BY-4.0)
@@ -1204,19 +1228,19 @@ class Chrome
 			if (!Code) {
 				CompressedSize := VarSetCapacity(DecompressionBuffer, 5678, 0)
 				if !DllCall("Crypt32\CryptStringToBinary", "Str", CodeBase64, "UInt", 0, "UInt", 1, "Ptr", &DecompressionBuffer, "UInt*", CompressedSize, "Ptr", 0, "Ptr", 0, "UInt")
-					throw Exception("Failed to convert MCLib b64 to binary")
+					throw Exception("Failed to convert MCLib b64 to binary", -1)
 				if !(pCode := DllCall("GlobalAlloc", "UInt", 0, "Ptr", 8216, "Ptr"))
-					throw Exception("Failed to reserve MCLib memory")
+					throw Exception("Failed to reserve MCLib memory", -1)
 				DecompressedSize := 0
 				if (DllCall("ntdll\RtlDecompressBuffer", "UShort", 0x102, "Ptr", pCode, "UInt", 8216, "Ptr", &DecompressionBuffer, "UInt", CompressedSize, "UInt*", DecompressedSize, "UInt"))
-					throw Exception("Error calling RtlDecompressBuffer",, Format("0x{:08x}", r))
+					throw Exception("Error calling RtlDecompressBuffer", -1, Format("0x{:08x}", r))
 				for k, Offset in [24, 509, 598, 1479, 1671, 1803, 1828, 1892, 2290, 2321, 2342, 3228, 3232, 3236, 3240, 3244, 3248, 3252, 3256, 3260, 3264, 3268, 3272, 3276, 3280, 3284, 3288, 3292, 3296, 3300, 3304, 3308, 3312, 3316, 3320, 3324, 3328, 3332, 3336, 3340, 3344, 3348, 3352, 3356, 3360, 3364, 3368, 3372, 3376, 3380, 3384, 3388, 3392, 3396, 3400, 3404, 3408, 3412, 3416, 3420, 3424, 3428, 3432, 3436, 3847, 4091, 4099, 4116, 4508, 4520, 4532, 5455, 6153, 7138, 7453, 7503, 7916, 7926, 7953, 7960] {
 					Old := NumGet(pCode + 0, Offset, "Ptr")
 					NumPut(Old + pCode, pCode + 0, Offset, "Ptr")
 				}
 				OldProtect := 0
 				if !DllCall("VirtualProtect", "Ptr", pCode, "Ptr", 8216, "UInt", 0x40, "UInt*", OldProtect, "UInt")
-					Throw Exception("Failed to mark MCLib memory as executable")
+					Throw Exception("Failed to mark MCLib memory as executable", -1)
 				Exports := {}
 				for ExportName, ExportOffset in {"bBoolsAsInts": 0, "bEmptyObjectsAsArrays": 4, "bEscapeUnicode": 8, "bNullsAsStrings": 12, "dumps": 16, "fnCastString": 288, "fnGetObj": 292, "loads": 296, "objFalse": 3192, "objNull": 3196, "objTrue": 3200} {
 					Exports[ExportName] := pCode + ExportOffset
@@ -1293,7 +1317,7 @@ class Chrome
 			. "cRDTAOvwdJTwECRj9xnwAATpn/euAWHpFo/wAIISZoACjVDgkZAJXg+HUUjpaxABAflG"
 			static Code := false
 			if ((A_PtrSize * 8) != 64) {
-				Throw Exception("_LoadLib64Bit does not support " (A_PtrSize * 8) " bit AHK, please run using 64 bit AHK")
+				Throw Exception("_LoadLib64Bit does not support " (A_PtrSize * 8) " bit AHK, please run using 64 bit AHK", -1)
 			}
 			; MCL standalone loader https://github.com/G33kDude/MCLib.ahk
 			; Copyright (c) 2021 G33kDude, CloakerSmoker (CC-BY-4.0)
@@ -1301,15 +1325,15 @@ class Chrome
 			if (!Code) {
 				CompressedSize := VarSetCapacity(DecompressionBuffer, 5343, 0)
 				if !DllCall("Crypt32\CryptStringToBinary", "Str", CodeBase64, "UInt", 0, "UInt", 1, "Ptr", &DecompressionBuffer, "UInt*", CompressedSize, "Ptr", 0, "Ptr", 0, "UInt")
-					throw Exception("Failed to convert MCLib b64 to binary")
+					throw Exception("Failed to convert MCLib b64 to binary", -1)
 				if !(pCode := DllCall("GlobalAlloc", "UInt", 0, "Ptr", 7984, "Ptr"))
-					throw Exception("Failed to reserve MCLib memory")
+					throw Exception("Failed to reserve MCLib memory", -1)
 				DecompressedSize := 0
 				if (DllCall("ntdll\RtlDecompressBuffer", "UShort", 0x102, "Ptr", pCode, "UInt", 7984, "Ptr", &DecompressionBuffer, "UInt", CompressedSize, "UInt*", DecompressedSize, "UInt"))
-					throw Exception("Error calling RtlDecompressBuffer",, Format("0x{:08x}", r))
+					throw Exception("Error calling RtlDecompressBuffer", -1, Format("0x{:08x}", r))
 				OldProtect := 0
 				if !DllCall("VirtualProtect", "Ptr", pCode, "Ptr", 7984, "UInt", 0x40, "UInt*", OldProtect, "UInt")
-					Throw Exception("Failed to mark MCLib memory as executable")
+					Throw Exception("Failed to mark MCLib memory as executable", -1)
 				Exports := {}
 				for ExportName, ExportOffset in {"bBoolsAsInts": 0, "bEmptyObjectsAsArrays": 16, "bEscapeUnicode": 32, "bNullsAsStrings": 48, "dumps": 64, "fnCastString": 304, "fnGetObj": 320, "loads": 336, "objFalse": 3360, "objNull": 3376, "objTrue": 3392} {
 					Exports[ExportName] := pCode + ExportOffset
@@ -1326,7 +1350,7 @@ class Chrome
 		{
 			this._init()
 			if (!IsObject(obj))
-				throw Exception("Input must be object")
+				throw Exception("Input must be object", -1)
 			size := 0
 			DllCall(this.lib.dumps, "Ptr", &obj, "Ptr", 0, "Int*", size
 			, "Int", !!pretty, "Int", 0, "CDecl Ptr")
