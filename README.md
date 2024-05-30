@@ -46,6 +46,13 @@ PageInst.WaitForLoad()
 ; Print the element's outerHTML value
 MsgBox % PageInst.querySelector("#MainTitle").outerHTML
 
+; Return a screenshot of the element (base64 encoded),
+base64 := PageInst.querySelector("#MainTitle").Screenshot()
+
+; you can save it as an image file by using the ImagePut library.
+; https://github.com/iseahound/ImagePut
+; ImageShow(base64)
+
 ; Execute some JavaScript
 PageInst.Evaluate("alert('Hello World!');")
 
