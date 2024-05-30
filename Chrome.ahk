@@ -1,7 +1,8 @@
-﻿; Chrome.ahk-plus v1.3.6
+﻿; Chrome.ahk-plus v1.4.0
 ; https://github.com/telppa/Chrome.ahk-plus
 
 ; 基于 GeekDude 2023.03.21 Release 版修改，与 GeekDude 版相比有以下增强。
+; 大幅简化元素及框架的操作。
 ; 支持谷歌 Chrome 与微软 Edge 。
 ; 报错可直接定位到用户代码，而不是库代码。
 ; 为所有可能造成死循环的地方添加了默认30秒的超时参数。
@@ -24,7 +25,7 @@
 
 class Chrome
 {
-	static version := "1.3.6"
+	static Version := "1.4.0"
 	
 	static DebugPort := 9222
 	
@@ -75,6 +76,7 @@ class Chrome
 			for Item in ComObjGet("winmgmts:")
 				.ExecQuery("SELECT CommandLine FROM Win32_Process"
 				. " WHERE Name = '" v "'")
+				; https://learn.microsoft.com/zh-cn/windows/win32/cimwin32prov/win32-process
 				if RegExMatch(Item.CommandLine, Needle, Match)
 					Out[Match1] := Item.CommandLine
 			
@@ -178,6 +180,9 @@ class Chrome
 		{
 			; It is easy to fail here because "new chrome()" takes a long time to execute.
 			; Therefore, it will be tried again and again within 30 seconds until it succeeds or timeout.
+			; 极端情况可能出现因为 page.Call("Browser.close",, false) 不等待返回值的关闭了浏览器
+			; 然后又极快的使用 FindInstances() 附着在了正在关闭的 chrome 进程上导致超时
+			; 实际案例就是在聚合翻译器的重启功能上
 			if (A_TickCount-StartTime > Timeout*1000)
 				throw Exception("Get page list timeout")
 			else
@@ -204,10 +209,10 @@ class Chrome
 		Value      - The value to search for in the provided key
 		MatchMode  - What kind of search to use, such as "exact", "contains", "startswith", or "regex"
 		Index      - If multiple pages match the given criteria, which one of them to return
-		fnCallback - A function to be called whenever message is received from the page
+		FnCallback - A function to be called whenever message is received from the page
 		Timeout    - Maximum number of seconds to wait for the page connection
 	*/
-	GetPageBy(Key, Value, MatchMode:="exact", Index:=1, fnCallback:="", fnClose:="", Timeout:=30)
+	GetPageBy(Key, Value, MatchMode:="exact", Index:=1, FnCallback:="", FnClose:="", Timeout:=30)
 	{
 		try
 		{
@@ -219,7 +224,7 @@ class Chrome
 					|| (MatchMode = "startswith" && InStr(PageData[Key], Value) == 1)
 					|| (MatchMode = "regex" && PageData[Key] ~= Value))
 					&& ++Count == Index)
-					return new this.Page(PageData.webSocketDebuggerUrl, fnCallback, fnClose, Timeout)
+					return new this.Page(PageData.webSocketDebuggerUrl, FnCallback, FnClose, Timeout)
 			}
 		}
 		catch e
@@ -229,10 +234,10 @@ class Chrome
 	/*
 		Shorthand for GetPageBy("url", Value, "startswith")
 	*/
-	GetPageByURL(Value, MatchMode:="startswith", Index:=1, fnCallback:="", fnClose:="", Timeout:=30)
+	GetPageByURL(Value, MatchMode:="startswith", Index:=1, FnCallback:="", FnClose:="", Timeout:=30)
 	{
 		try
-			return this.GetPageBy("url", Value, MatchMode, Index, fnCallback, fnClose, Timeout)
+			return this.GetPageBy("url", Value, MatchMode, Index, FnCallback, FnClose, Timeout)
 		catch e
 			throw Exception(e.Message, -1)
 	}
@@ -240,10 +245,10 @@ class Chrome
 	/*
 		Shorthand for GetPageBy("title", Value, "startswith")
 	*/
-	GetPageByTitle(Value, MatchMode:="startswith", Index:=1, fnCallback:="", fnClose:="", Timeout:=30)
+	GetPageByTitle(Value, MatchMode:="startswith", Index:=1, FnCallback:="", FnClose:="", Timeout:=30)
 	{
 		try
-			return this.GetPageBy("title", Value, MatchMode, Index, fnCallback, fnClose, Timeout)
+			return this.GetPageBy("title", Value, MatchMode, Index, FnCallback, FnClose, Timeout)
 		catch e
 			throw Exception(e.Message, -1)
 	}
@@ -254,10 +259,10 @@ class Chrome
 		The default type to search for is "page", which is the visible area of
 		a normal Chrome tab.
 	*/
-	GetPage(Index:=1, Type:="page", fnCallback:="", fnClose:="", Timeout:=30)
+	GetPage(Index:=1, Type:="page", FnCallback:="", FnClose:="", Timeout:=30)
 	{
 		try
-			return this.GetPageBy("type", Type, "exact", Index, fnCallback, fnClose, Timeout)
+			return this.GetPageBy("type", Type, "exact", Index, FnCallback, FnClose, Timeout)
 		catch e
 			throw Exception(e.Message, -1)
 	}
@@ -267,31 +272,40 @@ class Chrome
 	*/
 	class Page
 	{
-		Connected := False
-		ID := 0
-		Responses := []
+		Connected    := False
+		Id           := 0
+		Responses    := []
+		TargetId     := ""
+		Root         := ""
+		NodeId       := ""
 		
 		/*
-			wsurl      - The desired page's WebSocket URL
-			fnCallback - A function to be called whenever message is received
-			fnClose    - A function to be called whenever the page connection is lost
+			WsUrl      - The desired page's WebSocket URL
+			FnCallback - A function to be called whenever message is received
+			FnClose    - A function to be called whenever the page connection is lost
 			Timeout    - Maximum number of seconds to wait for the page connection
 		*/
-		__New(wsurl, fnCallback:="", fnClose:="", Timeout:=30)
+		__New(WsUrl, FnCallback:="", FnClose:="", Timeout:=30)
 		{
-			this.fnCallback := fnCallback
-			this.fnClose := fnClose
+			this.FnCallback := FnCallback
+			this.FnClose := FnClose
 			; Here is no waiting for a response so no need to add a timeout
+			; The method has a hide param in the first, so we need pass this in first
 			this.BoundKeepAlive := this.Call.Bind(this, "Browser.getVersion",, False)
 			
 			; TODO: Throw exception on invalid objects
-			if IsObject(wsurl)
-				wsurl := wsurl.webSocketDebuggerUrl
+			if IsObject(WsUrl)
+				WsUrl := WsUrl.webSocketDebuggerUrl
 			
-			RegExMatch(wsurl, "page/(.+)", targetId)
-			this.targetId := targetId1
-			ws := {"base": this.WebSocket, "_Event": this.Event, "Parent": this}
-			this.ws := new ws(wsurl)
+			; MUST PASS AN ADDRESS INSTEAD OF A VALUE
+			; or it will create circular references like the following
+			; this.ws.base.parent.ws.base.parent.ws.base.parent
+			; circular references will cause the Element.__Get.this.Clone() to fail
+			; There is no need to increase the reference count for ParentAddress
+			; because its lifetime is with the class Page
+			; Pass this.Event to cover the WebSocket's internal event dispatcher
+			ws := {"base": this.WebSocket, "_Event": this.Event, "ParentAddress": &this}
+			this.ws := new ws(WsUrl)
 			
 			; The timeout here is perhaps duplicated with the previous line
 			StartTime := A_TickCount
@@ -302,6 +316,13 @@ class Chrome
 				else
 					Sleep 50
 			}
+			
+			; Target Domain need
+			RegExMatch(WsUrl, "page/(.+)", TargetId)
+			this.TargetId := TargetId1
+			
+			; DOM Domain need
+			this.UpdateRoot()
 		}
 		
 		/*
@@ -331,10 +352,22 @@ class Chrome
 			if !this.Connected
 				throw Exception("Not connected to tab", -1)
 			
-			; Use a temporary variable for ID in case more calls are made
+			; Avoid external calls to DOM.getDocument that destroys the internal variable this.Root
+			if (DomainAndMethod="DOM.getDocument" and IsObject(this.Root))
+				return this.Root
+			
+			if (DomainAndMethod = "DOM.getRoot")
+				DomainAndMethod := "DOM.getDocument"
+			
+			; Use a temporary variable for Id in case more calls are made
 			; before we receive a response.
-			ID := this.ID += 1
-			this.ws.Send(Chrome.JSON.Dump({"id": ID
+			Id := this.Id += 1
+			; this.responses[Id] must be created before this.ws.Send()
+			; or we will get response timeout if we receive a reply very soon.
+			if (WaitForResponse)
+				this.responses[Id] := false
+			
+			this.ws.Send(Chrome.JSON.Dump({"id": Id
 			, "params": Params ? Params : {}
 			, "method": DomainAndMethod}))
 			
@@ -342,9 +375,8 @@ class Chrome
 				return
 			
 			; Wait for the response
-			this.responses[ID] := False
 			StartTime := A_TickCount
-			while !this.responses[ID]
+			while !this.responses[Id]
 			{
 				if (A_TickCount-StartTime > Timeout*1000)
 					throw Exception(DomainAndMethod " response timeout", -1)
@@ -353,7 +385,7 @@ class Chrome
 			}
 			
 			; Get the response, check if it's an error
-			response := this.responses.Delete(ID)
+			response := this.responses.Delete(Id)
 			if (response.error)
 				throw Exception("Chrome indicated error in response", -1, Chrome.JSON.Dump(response.error))
 			
@@ -370,23 +402,29 @@ class Chrome
 		{
 			try
 			{
+				; You can see the parameters of Runtime.evaluate in the protocol monitor
+				; after pressing Enter in the chrome devtools - console.
+				; Missing parameter “uniqueContextId”.
 				response := this.Call("Runtime.evaluate",
-				( LTrim Join
+				(LTrim Join
 				{
+					"allowUnsafeEvalBlockedByCSP": Chrome.JSON.False,
+					"awaitPromise": Chrome.JSON.False,
 					"expression": JS,
-					"objectGroup": "console",
+					"generatePreview": Chrome.JSON.True,
 					"includeCommandLineAPI": Chrome.JSON.True,
-					"silent": Chrome.JSON.False,
+					"objectGroup": "console",
+					"replMode": Chrome.JSON.True,
 					"returnByValue": Chrome.JSON.False,
-					"userGesture": Chrome.JSON.True,
-					"awaitPromise": Chrome.JSON.False
+					"silent": Chrome.JSON.False,
+					"userGesture": Chrome.JSON.True
 				}
 				), , Timeout)
 				
 				if (response.exceptionDetails)
-					throw Exception(response.result.description, -1
-						, Chrome.JSON.Dump({"Code": JS
-						, "exceptionDetails": response.exceptionDetails}))
+					throw Exception(response.result.description
+						, -1
+						, Chrome.JSON.Dump({"Code": JS, "exceptionDetails": response.exceptionDetails}))
 				
 				return response.result
 			}
@@ -425,8 +463,8 @@ class Chrome
 		Event(EventName, Event)
 		{
 			; If it was called from the WebSocket adjust the class context
-			if this.Parent
-				this := this.Parent
+			if this.ParentAddress
+				this := Object(this.ParentAddress)
 			
 			if (EventName == "Error")
 			{
@@ -436,26 +474,48 @@ class Chrome
 			{
 				this.Connected := True
 				BoundKeepAlive := this.BoundKeepAlive
-				SetTimer, %BoundKeepAlive%, 15000
+				SetTimer %BoundKeepAlive%, 15000
 			}
 			else if (EventName == "Message")
 			{
 				data := Chrome.JSON.Load(Event.data)
 				
-				; Run the callback routine
-				fnCallback := this.fnCallback
-				if (newData := %fnCallback%(data))
-					data := newData
+				; It's a response for the request of Page.Call()
+				if (data.Id && this.responses.HasKey(data.Id))
+					this.responses[data.Id] := data
 				
-				if this.responses.HasKey(data.ID)
-					this.responses[data.ID] := data
+				; It's CDP events
+				if (data.method)
+				{
+					; Run the callback routine
+					FnCallback := this.FnCallback
+					if (newData := %fnCallback%(data))
+						data := newData
+					
+					; Auto update root DOM node when page has been totally updated
+					if (data.method == "DOM.documentUpdated")
+						this.UpdateRoot()
+				}
 			}
 			else if (EventName == "Close")
 			{
 				this.Disconnect()
-				fnClose := this.fnClose
-				%fnClose%(this)
+				
+				FnClose := this.FnClose
+				%FnClose%(this)
 			}
+		}
+		
+		/*
+			Close the page and disconnect from the page's debug interface,
+			allowing the instance to be garbage collected.
+			
+			This method fire Page.Disconnect() automatically, so you don't
+			need to call Page.Disconnect() manually.
+		*/
+		Close()
+		{
+			this.Call("Page.close")
 		}
 		
 		/*
@@ -464,6 +524,12 @@ class Chrome
 			
 			This method should always be called when you are finished with a
 			page or else your script will leak memory.
+			
+			Page.Call("Browser.close") or Page.Call("Page.close") or manually
+			closing the page will automatically fire this method.
+			
+			When this method is automatically fired, DO NOT call it again
+			or you will miss the event FnClose and FnCallback.
 		*/
 		Disconnect()
 		{
@@ -471,23 +537,374 @@ class Chrome
 				return
 			
 			this.Connected := False
-			this.ws.Delete("Parent")
-			this.ws.Disconnect()
+			this.ws := ""
 			
 			BoundKeepAlive := this.BoundKeepAlive
-			SetTimer, %BoundKeepAlive%, Delete
+			SetTimer %BoundKeepAlive%, Delete
 			this.Delete("BoundKeepAlive")
+		}
+		
+		; https://www.dezlearn.com/nested-iframes-example/
+		SwitchToMainPage()
+		{
+			return this.NodeId := this.Root.root.nodeId
+		}
+		SwitchToFrame(Index*)
+		{
+			try
+			{
+				FrameTree := this.Call("Page.getFrameTree").frameTree
+				
+				loop % Index.Length()
+				{
+					i := Index[A_Index]
+					
+					if (A_Index = Index.Length())
+						FrameId := FrameTree.childFrames[i].frame.id
+					else
+						FrameTree := FrameTree.childFrames[i]
+				}
+				
+				if (FrameId)
+					return this.NodeId := this._FrameIdToNodeId(FrameId)
+			}
+			catch e
+				throw Exception(e.Message, -1, e.Extra)
+		}
+		SwitchToFrameByURL(URL, MatchMode:="startswith")
+		{
+			return this.NodeId := this._SwitchToFrameBy("URL", URL, MatchMode)
+		}
+		SwitchToFrameByName(Name, MatchMode:="startswith")
+		{
+			return this.NodeId := this._SwitchToFrameBy("Name", Name, MatchMode)
+		}
+		_SwitchToFrameBy(Key, Value, MatchMode)
+		{
+			try
+			{
+				FrameTree := this.Call("Page.getFrameTree").frameTree
+				FrameId := this._FindFrameBy(Key, Value, FrameTree, MatchMode)
+				
+				if (FrameId)
+					return this._FrameIdToNodeId(FrameId)
+			}
+			catch e
+				throw Exception(e.Message, -2, e.Extra)
+		}
+		_FindFrameBy(Key, Value, FrameTree, MatchMode)
+		{
+			for i, v in FrameTree.childFrames
+			{
+				if (Key = "URL")
+					str := v.frame.url v.frame.urlFragment
+				else if (Key = "Name")
+					str := v.frame.name
+				else
+					return
+				
+				if (str = "")
+					continue
+				
+				if ( (MatchMode = "exact"      && str = Value)            ; Case insensitive
+					or (MatchMode = "contains"   && InStr(str, Value))
+					or (MatchMode = "startswith" && InStr(str, Value) == 1)
+					or (MatchMode = "regex"      && str ~= Value) )
+					return v.frame.id
+			}
+			
+			for i, v in FrameTree.childFrames
+			{
+				if (v.HasKey("childFrames"))
+					ret := this._FindFrameBy(Key, Value, v, MatchMode)
+				if (ret != "")
+					return ret
+			}
+		}
+		; https://github.com/Xeo786/Rufaydium-Webdriver/blob/main/CDP.ahk
+		_FrameIdToNodeId(FrameId)
+		{
+			; 看起来 DOM.getFrameOwner 好像就直接将 FrameId 转为 NodeId 了
+			; 实际上必须进行下面4步转换才能得到正确的 NodeId
+			; 这个结论是试出来的，具体原理未知
+			nodeId            := this.Call("DOM.getFrameOwner", {"frameId": FrameId}).nodeId
+			backendNodeId     := this.Call("DOM.describeNode", {"nodeId": nodeId}).node.contentDocument.backendNodeId
+			contentDocObject  := this.Call("DOM.resolveNode", {"backendNodeId": backendNodeId}).object.objectId
+			return               this.Call("DOM.requestNode", {"objectId": contentDocObject}).nodeId
+		}
+		
+		UpdateRoot()
+		{
+			static _i := 0
+			
+			try
+			{
+				i := _i += 1
+				; DOM.getDocument 是全局生效的，每次调用后都会破坏之前已经找到的页面元素
+				; 因此 Page.Call() 中做了特殊处理，可防止外部调用 DOM.getDocument
+				; 所以必须使用一个内部别名 DOM.getRoot 来调用 DOM.getDocument
+				; DOM.getRoot is an internal alias of DOM.getDocument
+				Root := this.Call("DOM.getRoot")
+				; 页面自动刷新时 DOM.documentUpdated 事件会激活至少2次
+				; 每次 DOM.documentUpdated 事件又会自动调用 UpdateRoot()
+				; 此时就很容易出现数个 Page.Call("DOM.getRoot") 都在等待返回值
+				; 当返回值出现后，后调用的返回值将先写入 Page.NodeId
+				; 而后先调用的返回值又再次写入 Page.NodeId
+				; 这就会造成错误，因为先调用的返回值已经过时了
+				; 所以这里将对返回值的调用顺序进行验证，只保留最后一次调用的
+				; Keep only the return value of the last call to Page.Call("DOM.getRoot")
+				if (i >= _i)
+				{
+					this.Root   := Root
+					this.NodeId := this.Root.root.nodeId
+				}
+			}
+			catch e
+				throw Exception(e.Message, -1, e.Extra)
+		}
+		
+		QuerySelector(Selector)
+		{
+			try NodeId := this.Call("DOM.querySelector", {"nodeId": this.NodeId, "selector": Selector}).nodeId
+			return (!NodeId) ? "" : new this.Element(NodeId, this)
+		}
+		QuerySelectorAll(Selector)
+		{
+			try NodeId := this.Call("DOM.querySelectorAll", {"nodeId": this.NodeId, "selector": Selector}).nodeIds
+			return (!NodeId) ? "" : new this.Element(NodeId, this)
+		}
+		GetElementById(Id)
+		{
+			return this.querySelector("[id='" Id "']")
+		}
+		GetElementsbyClassName(Class)
+		{
+			return this.querySelectorAll("[class='" Class "']")
+		}
+		GetElementsbyName(Name)
+		{
+			return this.querySelectorAll("[name='" Name "']")
+		}
+		GetElementsbyTagName(TagName)
+		{
+			return this.querySelectorAll(TagName)
+		}
+		; Not yet realized
+		GetElementsbyXpath(Xpath)
+		{
+			return
+		}
+		
+		Url[]
+		{
+			get
+			{
+				try
+				{
+					loop 3
+						if (url := this.Evaluate("window.location.href;", Timeout := 2).value)
+							return url
+				}
+				catch e
+					throw Exception(e.Message, -1, e.Extra)
+			}
+			
+			set
+			{
+				try
+					this.Call("Page.navigate", {"url": value})
+				catch e
+					throw Exception(e.Message, -1, e.Extra)
+			}
+		}
+		
+		class Element
+		{
+			__New(NodeId, Parent)
+			{
+				ObjRawSet(this, "NodeId", NodeId)
+				ObjRawSet(this, "Parent", Parent)
+			}
+			
+			__Get(Key)
+			{
+				; The user wants to get a value like element[1] and NodeId is NodeIds like [1,2,3]
+				if Key is digit
+				{
+					if (Key!="" and IsObject(this.NodeId))
+					{
+						if (Key = 0)
+							throw Exception("Array index start at 1 instead of 0", -1)
+						
+						ThisClone := ObjClone(this)
+						ThisClone.NodeId := this.NodeId[Key]
+						return ThisClone
+					}
+				}
+				; The user wants to get a value like element.textContent
+				else
+				{
+					try
+					{
+						str := this._GetProp(Key).result.value
+						
+						if (SubStr(str, 1, 1)="{" and SubStr(str, 0, 1)="}")
+							obj := Chrome.JSON.Load(str)
+						
+						return IsObject(obj) ? obj : str
+					}
+					catch e
+						throw Exception(e.Message, -1, e.Extra)
+				}
+			}
+			
+			__Set(Key, Value)
+			{
+				try
+					return this._SetProp(Key, Value)
+				catch e
+					throw Exception(e.Message, -1, e.Extra)
+			}
+			
+			__Call(Name, Params*)
+			{
+				; The user wants to call a method which not in this class
+				if (!IsFunc(ObjGetBase(this)[Name]))
+				{
+					try
+					{
+						str := this._CallMethod(Name, Params*).result.value
+						
+						if (SubStr(str, 1, 1)="{" and SubStr(str, 0, 1)="}")
+							obj := Chrome.JSON.Load(str)
+						
+						return IsObject(obj) ? obj : str
+					}
+					catch e
+						throw Exception(e.Message, -1, e.Extra)
+				}
+			}
+			
+			__Delete()
+			{
+				; MsgBox 元素释放了
+			}
+			
+			_GetProp(Key)
+			{
+				JS =
+				(LTrim
+					function() {
+						let result = this.%Key%
+						if (typeof result === 'object' && result !== null) {
+							return JSON.stringify(result)
+						} else { return result }}
+				)
+				
+				return this._CallFunctionOn(JS)
+			}
+			
+			_SetProp(Key, Value)
+			{
+				; Escape ` to \`
+				Value := StrReplace(Value, "``", "\``")
+				; Escape $ to \$
+				Value := StrReplace(Value, "$", "\$")
+				
+				JS =
+				(LTrim
+					function() { 
+						let template = ``%Value%``;
+						this.%Key% = template }
+				)
+				
+				return this._CallFunctionOn(JS)
+			}
+			
+			_CallMethod(Name, Params*)
+			{
+				for Key, Value in Params
+				{
+					; Escape ` to \`
+					Value := StrReplace(Value, "``", "\``")
+					; Escape $ to \$
+					Value := StrReplace(Value, "$", "\$")
+					; Build a string like
+					; let param_1 = `123`;
+					; let param_2 = `test`;
+					StrParams1 .= Format("let param_{} = ``{}``;`n", A_Index, Value)
+					; Build a string like
+					; param_1,param_2,param_3
+					StrParams2 .= (A_Index = 1) ? "param_1" : Format(",param_{}", A_Index)
+				}
+				
+				JS =
+				(LTrim
+					function() {
+						%StrParams1%
+						let result = this.%Name%(%StrParams2%)
+						if (typeof result === 'object' && result !== null) {
+							return JSON.stringify(result)
+						} else { return result }}
+				)
+				
+				return this._CallFunctionOn(JS)
+			}
+			
+			_CallFunctionOn(JS)
+			{
+				objectId := this.Parent.Call("DOM.resolveNode", {"nodeId": this.NodeId}).object.objectId
+				return this.Parent.Call("Runtime.callFunctionOn", {"objectId": objectId, "functionDeclaration": JS})
+			}
+			
+			; Return the number of elements which found by QuerySelectorAll()
+			Count()
+			{
+				return this.NodeId.Length()
+			}
+			
+			; Return a screenshot of the element (base64 encoded),
+			; you can save it as an image file by using the ImagePut library.
+			; https://github.com/iseahound/ImagePut
+			Screenshot()
+			{
+				try
+				{
+					JS =
+					(LTrim
+						function() {
+							const e = this.getBoundingClientRect(),
+							t = this.ownerDocument.documentElement.getBoundingClientRect();
+							return JSON.stringify({
+								x: e.left - t.left,
+								y: e.top - t.top,
+								width: e.width,
+								height: e.height,
+								scale: 1})}
+					)
+					
+					params := { "captureBeyondViewport": Chrome.JSON.True
+										, "clip": Chrome.JSON.Load(this._CallFunctionOn(JS).result.value)
+										, "format": "png"
+										, "fromSurface": Chrome.JSON.True
+										, "quality": 100}
+					
+					return this.Parent.Call("Page.captureScreenshot", params).data
+				}
+				catch e
+					throw Exception(e.Message, -1, e.Extra)
+			}
 		}
 		
 		class WebSocket {
 			
 			; The primary HINTERNET handle to the websocket connection
 			; This field should not be set externally.
-			Ptr := 0
+			ptr := ""
 			
 			; Whether the websocket is operating in Synchronous or Asynchronous mode.
 			; This field should not be set externally.
-			async := 0
+			async := ""
 			
 			; The readiness state of the websocket.
 			; This field should not be set externally.
@@ -507,6 +924,13 @@ class Chrome
 			; Internal buffer used to hold data fragments for multi-packet messages
 			recData := ""
 			recDataSize := 0
+			
+			; Define in winerror.h
+			ERROR_INVALID_OPERATION := 4317
+			
+			; Aborted connection Event
+			EVENT_ABORTED := { status: 1006 ; WEB_SOCKET_ABORTED_CLOSE_STATUS
+				, reason: "The connection was closed without sending or receiving a close frame." }
 			
 			_LastError(Err := -1)
 			{
@@ -591,18 +1015,15 @@ class Chrome
 				; Force async to boolean
 				this.async := async := !!async
 				
-				; Iniitalize the Cache
+				; Initialize the Cache
 				ObjSetCapacity(this, "cache", this.cacheSize)
 				this.pCache := ObjGetAddress(this, "cache")
 				
-				; Iniitalize the RecData
+				; Initialize the RecData
 				; this.pRecData := ObjGetAddress(this, "recData")
 				
-				; Find the script's built-in window for message targeting
-				dhw := A_DetectHiddenWindows
-				DetectHiddenWindows, On
-				this.hWnd := WinExist("ahk_class AutoHotkey ahk_pid " DllCall("GetCurrentProcessId"))
-				DetectHiddenWindows, %dhw%
+				; script's built-in window for message targeting
+				this.hWnd := A_ScriptHwnd
 				
 				; Parse the url
 				if !RegExMatch(url, "Oi)^((?<SCHEME>wss?)://)?((?<USERNAME>[^:]+):(?<PASSWORD>.+)@)?(?<HOST>[^/:]+)(:(?<PORT>\d+))?(?<PATH>/.*)?$", m)
@@ -643,11 +1064,12 @@ class Chrome
 				
 				; Set any event handlers from events parameter
 				for k, v in IsObject(events) ? events : []
-					if (k ~= "i)^(data|message|close)$")
+					if (k ~= "i)^(data|message|close|error|open)$")
 						this["on" k] := v
 				
 				; Set up a handler for messages from the StatusSyncCallback mcode
 				this.wm_ahkmsg := DllCall("RegisterWindowMessage", "Str", "AHK_WEBSOCKET_STATUSCHANGE_" &this, "UInt")
+				; .Bind({}) make parameter "this" = {}
 				OnMessage(this.wm_ahkmsg, this.WEBSOCKET_STATUSCHANGE.Bind({})) ; TODO: Proper binding
 				
 				; Connect on start
@@ -704,12 +1126,12 @@ class Chrome
 					throw Exception("Invalid status: " status)
 				
 				; Upgrade the HTTP Request to a Websocket connection
-				if !(this.Ptr := DllCall("Winhttp\WinHttpWebSocketCompleteUpgrade", "Ptr", hRequest, "Ptr", 0))
+				if !(this.ptr := DllCall("Winhttp\WinHttpWebSocketCompleteUpgrade", "Ptr", hRequest, "Ptr", 0))
 					throw Exception("WinHttpWebSocketCompleteUpgrade failed: " this._LastError())
 				
 				; Close the HTTP Request, save the Websocket connection
 				DllCall("Winhttp\WinHttpCloseHandle", "Ptr", this.HINTERNETs.Pop())
-				this.HINTERNETs.Push(this.Ptr)
+				this.HINTERNETs.Push(this.ptr)
 				this.readyState := 1
 				
 				; Configure asynchronous callbacks
@@ -724,7 +1146,7 @@ class Chrome
 					NumPut(this.wm_ahkmsg, pCtx + A_PtrSize * 3, "UInt")
 					
 					if !DllCall("Winhttp\WinHttpSetOption"
-						, "Ptr", this.Ptr   ; [in] HINTERNET hInternet
+						, "Ptr", this.ptr   ; [in] HINTERNET hInternet
 						, "UInt", 45        ; [in] DWORD     dwOption
 						, "Ptr*", pCtx      ; [in] LPVOID    lpBuffer
 						, "UInt", A_PtrSize ; [in] DWORD     dwBufferLength
@@ -733,7 +1155,7 @@ class Chrome
 					
 					StatusCallback := this._StatusSyncCallback()
 					if (-1 == DllCall("Winhttp\WinHttpSetStatusCallback"
-						, "Ptr", this.Ptr       ; [in] HINTERNET               hInternet,
+						, "Ptr", this.ptr       ; [in] HINTERNET               hInternet,
 						, "Ptr", StatusCallback ; [in] WINHTTP_STATUS_CALLBACK lpfnInternetCallback,
 						, "UInt", 0x80000       ; [in] DWORD                   dwNotificationFlags,
 						, "UPtr", 0             ; [in] DWORD_PTR               dwReserved
@@ -742,7 +1164,7 @@ class Chrome
 					
 					; Make the initial request for data to receive an asynchronous response for
 					if (ret := DllCall("Winhttp\WinHttpWebSocketReceive"
-						, "Ptr", this.Ptr        ; [in]  HINTERNET                      hWebSocket,
+						, "Ptr", this.ptr        ; [in]  HINTERNET                      hWebSocket,
 						, "Ptr", this.pCache     ; [out] PVOID                          pvBuffer,
 						, "UInt", this.cacheSize ; [in]  DWORD                          dwBufferLength,
 						, "UInt*", 0             ; [out] DWORD                          *pdwBytesRead,
@@ -752,17 +1174,20 @@ class Chrome
 				}
 				
 				; Fire the open event
-				this._Event("Open", {})
+				this._Event("Open", {timestamp:A_Now A_Msec, url: this.url})
 			}
 			
 			WEBSOCKET_STATUSCHANGE(wp, lp, msg, hwnd) {
+				; Buffer events
+				Critical
+				
+				; Grab `this` from the provided context struct
+				this := Object(NumGet(wp + A_PtrSize * 0, "Ptr"))
+				
 				if !lp {
 					this.readyState := 3
 					return
 				}
-				
-				; Grab `this` from the provided context struct
-				this := Object(NumGet(wp + A_PtrSize * 0, "Ptr"))
 				
 				; Don't process data when the websocket isn't ready
 				if (this.readyState != 1)
@@ -782,7 +1207,10 @@ class Chrome
 				{
 					closeStatus := this.QueryCloseStatus()
 					this.shutdown()
-					this.onClose(closeStatus.status, closeStatus.reason)
+					; We need to return as soon as possible.
+					; If we don't use a SetTimer and call a ws request in Close event, it will cause a deadlock.
+					BoundFunc := this._Event.Bind(this, "Close", {reason: closeStatus.reason, status: closeStatus.status})
+					SetTimer %BoundFunc%, -1
 					return
 				}
 				
@@ -808,25 +1236,31 @@ class Chrome
 							; Clear fragment buffer
 							this.recDataSize := 0
 							
-							this.onData(data, offset + dwBytesTransferred)
+							; We need to return as soon as possible.
+							; If we don't use a SetTimer and call a ws request in Data event, it will cause a deadlock.
+							BoundFunc := this._Event.Bind(this, "Data", {data: &data, size: offset + dwBytesTransferred})
+							SetTimer %BoundFunc%, -1
 						}
 						else ; No prior fragment
 						{
 							; Copy data from the new data cache
 							VarSetCapacity(data, dwBytesTransferred)
+							
 							DllCall("RtlMoveMemory"
 							, "Ptr", &data
 							, "Ptr", this.pCache
 							, "UInt", dwBytesTransferred)
 							
-							this.onData(data, dwBytesTransferred)
+							; We need to return as soon as possible.
+							; If we don't use a SetTimer and call a ws request in Data event, it will cause a deadlock.
+							BoundFunc := this._Event.Bind(this, "Data", {data: &data, size: dwBytesTransferred})
+							SetTimer %BoundFunc%, -1
 						}
 					}
 					else if (eBufferType == 2) ; UTF8
 					{
-						if offset
+						if offset ; Continued from a fragment
 						{
-							; Continued from a fragment
 							this.recDataSize += dwBytesTransferred
 							ObjSetCapacity(this, "recData", this.recDataSize)
 							
@@ -841,7 +1275,10 @@ class Chrome
 						else ; No prior fragment
 							msg := StrGet(this.pCache, dwBytesTransferred, "utf-8")
 						
-						this._Event("Message", {data: msg})
+						; We need to return as soon as possible.
+						; If we don't use a SetTimer and call a ws request in Message event, it will cause a deadlock.
+						BoundFunc := this._Event.Bind(this, "Message", {data: msg})
+						SetTimer %BoundFunc%, -1
 					}
 					else if (eBufferType == 1 || eBufferType == 3) ; BINARY_FRAGMENT, UTF8_FRAGMENT
 					{
@@ -857,7 +1294,7 @@ class Chrome
 				finally
 				{
 					askForMoreData := this.askForMoreData.Bind(this, hInternet)
-					SetTimer, %askForMoreData%, -1
+					SetTimer %askForMoreData%, -1
 				}
 			}
 			
@@ -872,7 +1309,7 @@ class Chrome
 				, "UInt*", 0             ; [out] DWORD     *pdwBytesRead,
 				, "UInt*", 0             ; [out]           *peBufferType
 				, "UInt") ; DWORD
-				if (ret && ret != 4317) ; TODO: what is this constant?
+				if (ret && ret != this.ERROR_INVALID_OPERATION)
 					this._Error({code: ret})
 			}
 			
@@ -894,14 +1331,14 @@ class Chrome
 				if (this.readyState == 3)
 					return
 				this.readyState := 3
-				try this._Event("Close", {status: 1006, reason: ""})
+				try this._Event("Close", this.EVENT_ABORTED)
 			}
 			
 			queryCloseStatus() {
 				usStatus := 0
 				VarSetCapacity(vReason, 123, 0)
 				if (!DllCall("Winhttp\WinHttpWebSocketQueryCloseStatus"
-					, "Ptr", this.Ptr     ; [in]  HINTERNET hWebSocket,
+					, "Ptr", this.ptr     ; [in]  HINTERNET hWebSocket,
 					, "UShort*", usStatus ; [out] USHORT    *pusStatus,
 					, "Ptr", &vReason     ; [out] PVOID     pvReason,
 					, "UInt", 123         ; [in]  DWORD     dwReasonLength,
@@ -909,7 +1346,7 @@ class Chrome
 					, "UInt")) ; DWORD
 					return { status: usStatus, reason: StrGet(&vReason, len, "utf-8") }
 				else if (this.readyState > 1)
-					return { status: 1006, reason: "" }
+					return this.EVENT_ABORTED
 			}
 			
 			; eBufferType BINARY_MESSAGE = 0, BINARY_FRAGMENT = 1, UTF8_MESSAGE = 2, UTF8_FRAGMENT = 3
@@ -917,7 +1354,7 @@ class Chrome
 				if (this.readyState != 1)
 					throw Exception("websocket is disconnected")
 				if (ret := DllCall("Winhttp\WinHttpWebSocketSend"
-					, "Ptr", this.Ptr        ; [in] HINTERNET                      hWebSocket
+					, "Ptr", this.ptr        ; [in] HINTERNET                      hWebSocket
 					, "UInt", eBufferType    ; [in] WINHTTP_WEB_SOCKET_BUFFER_TYPE eBufferType
 					, "Ptr", pvBuffer        ; [in] PVOID                          pvBuffer
 					, "UInt", dwBufferLength ; [in] DWORD                          dwBufferLength
@@ -949,7 +1386,7 @@ class Chrome
 				
 				offset := 0
 				while (!ret := DllCall("Winhttp\WinHttpWebSocketReceive"
-					, "Ptr", this.Ptr           ; [in]  HINTERNET                      hWebSocket
+					, "Ptr", this.ptr           ; [in]  HINTERNET                      hWebSocket
 					, "Ptr", this.pCache        ; [out] PVOID                          pvBuffer
 					, "UInt", this.cacheSize    ; [in]  DWORD                          dwBufferLength
 					, "UInt*", dwBytesRead := 0 ; [out] DWORD                          *pdwBytesRead
@@ -968,7 +1405,7 @@ class Chrome
 						}
 						else
 						{
-							recSize := dwBytesRead
+							rec.Size := dwBytesRead
 							ObjSetCapacity(rec, "data", rec.size)
 							ptr := ObjGetAddress(rec, "data")
 							DllCall("RtlMoveMemory", "Ptr", ptr, "Ptr", this.pCache, "UInt", dwBytesRead)
@@ -996,7 +1433,7 @@ class Chrome
 							return
 					}
 				}
-				if (ret != 4317)
+				if (ret && ret != this.ERROR_INVALID_OPERATION)
 					this._Error({code: ret})
 			}
 			
@@ -1005,7 +1442,7 @@ class Chrome
 				if (this.readyState != 1)
 					return
 				this.readyState := 2
-				DllCall("Winhttp\WinHttpWebSocketShutdown", "Ptr", this.Ptr, "UShort", 1000, "Ptr", 0, "UInt", 0)
+				DllCall("Winhttp\WinHttpWebSocketShutdown", "Ptr", this.ptr, "UShort", 1000, "Ptr", 0, "UInt", 0)
 				this.readyState := 3
 			}
 		}
@@ -1036,32 +1473,31 @@ class Chrome
 		return this.JSON.Null()
 	}
 	
-	;
-	; cJson.ahk 0.6.0-git-built
-	; Copyright (c) 2021 Philip Taylor (known also as GeekDude, G33kDude)
-	; https://github.com/G33kDude/cJson.ahk
-	;
-	; MIT License
-	;
-	; Permission is hereby granted, free of charge, to any person obtaining a copy
-	; of this software and associated documentation files (the "Software"), to deal
-	; in the Software without restriction, including without limitation the rights
-	; to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-	; copies of the Software, and to permit persons to whom the Software is
-	; furnished to do so, subject to the following conditions:
-	;
-	; The above copyright notice and this permission notice shall be included in all
-	; copies or substantial portions of the Software.
-	;
-	; THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-	; IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-	; FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-	; AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-	; LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-	; OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-	; SOFTWARE.
-	;
-	
+	/*
+		cJson.ahk 0.6.0-git-built
+		Copyright (c) 2021 Philip Taylor (known also as GeekDude, G33kDude)
+		https://github.com/G33kDude/cJson.ahk
+		
+		MIT License
+		
+		Permission is hereby granted, free of charge, to any person obtaining a copy
+		of this software and associated documentation files (the "Software"), to deal
+		in the Software without restriction, including without limitation the rights
+		to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+		copies of the Software, and to permit persons to whom the Software is
+		furnished to do so, subject to the following conditions:
+		
+		The above copyright notice and this permission notice shall be included in all
+		copies or substantial portions of the Software.
+		
+		THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+		IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+		FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+		AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+		LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+		OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+		SOFTWARE.
+	*/
 	class JSON
 	{
 		static version := "0.6.0-git-built"
