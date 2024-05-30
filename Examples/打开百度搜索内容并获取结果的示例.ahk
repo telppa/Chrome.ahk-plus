@@ -16,7 +16,7 @@ ChromeInst := new Chrome("User_Data")
 
 ; 对于使用 querySelector 或 querySelectorAll 等方法获取的元素
 ; 支持元素在 JS 中的全部属性与方法（注意：大小写必须与 JS 中的保持一致）
-; 选择元素虽然支持 .getElementById() 等方法，但建议只用 .querySelector()
+; 获取元素虽然支持 .getElementById() 等方法，但建议只用 .querySelector()
 ; 因为通过浏览器 -> 审查元素（开发者工具） -> Elements -> Copy -> Copy JS path
 ; 可以快速得到 .querySelector() 中需要填的内容
 标签.querySelector("#hotsearch-refresh-btn").click()                             ; 调用元素的 js 方法，点击换一换按钮
