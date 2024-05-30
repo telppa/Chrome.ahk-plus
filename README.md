@@ -6,6 +6,7 @@ Automate Google Chrome and MS Edge using native AutoHotkey.
 
 ## What has been enhanced compared to Chrome.ahk
 
+* Significantly simplifies the manipulation of elements and frames.
 * `Google Chrome` and `Microsoft Edge` are supported.
 * Error reports directed to user code instead of library code.
 * Added 30-seconds timeout for all funtions that could cause a dead loop.
@@ -13,6 +14,7 @@ Automate Google Chrome and MS Edge using native AutoHotkey.
 * Fixed an issue that Chrome to report error due to slow opening.
 * Fixed an issue that Chrome to report error due to shortcuts were not found.
 * 基于 GeekDude 2023.03.21 Release 版修改，与 GeekDude 版相比有以下增强。
+* 大幅简化元素及框架的操作。
 * 支持`谷歌 Chrome`、`微软 Edge`、`百分浏览器`。
 * 报错可直接定位到用户代码，而不是库代码。
 * 为所有可能造成死循环的地方添加了默认30秒的超时参数。
@@ -84,7 +86,7 @@ PageInst := ChromeInst.GetPage()
 PageInst.url := "https://autohotkey.com/"
 PageInst.WaitForLoad()
 
-; Print element's outerHTML
+; Print element's outerHTML value
 MsgBox % PageInst.querySelector("#MainTitle").outerHTML
 
 ; Execute some JavaScript
