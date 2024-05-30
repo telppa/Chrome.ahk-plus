@@ -81,15 +81,17 @@ ChromeInst := new Chrome("ChromeProfile")
 ; Note: If your first action is to navigate away, it may be just as
 ; effective to provide the target URL when instantiating the Chrome class
 PageInst := ChromeInst.GetPage()
-PageInst.Call("Page.navigate", {"url": "https://autohotkey.com/"})
+PageInst.url := "https://autohotkey.com/"
 PageInst.WaitForLoad()
+
+; Print element's outerHTML
+MsgBox % PageInst.querySelector("#MainTitle").outerHTML
 
 ; Execute some JavaScript
 PageInst.Evaluate("alert('Hello World!');")
 
-; Close the browser (note: this closes *all* pages/tabs)
-PageInst.Call("Browser.close")
-PageInst.Disconnect()
+; Close the page
+PageInst.Close()
 
 ExitApp
 return
