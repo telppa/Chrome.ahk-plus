@@ -43,11 +43,11 @@ PageInst := ChromeInst.GetPage()
 PageInst.Url := "https://autohotkey.com/"
 PageInst.WaitForLoad()
 
-; Supports all JS propertys of element
+; Support for get/set all JS propertys of element
 MsgBox % PageInst.querySelector("#MainTitle").outerHTML
 PageInst.querySelector("#MainTitle").innerHTML := "Set property is also very easy"
 
-; Supports all JS methods of element
+; Support for call all JS methods of element
 rect := PageInst.querySelector("#MainTitle").getBoundingClientRect()
 MsgBox % rect.x "`n" rect.y
 
