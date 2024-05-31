@@ -43,15 +43,11 @@ PageInst := ChromeInst.GetPage()
 PageInst.Url := "https://autohotkey.com/"
 PageInst.WaitForLoad()
 
-
 ; Supports all JS propertys of element
-; Get the value of element's outerHTML
 MsgBox % PageInst.querySelector("#MainTitle").outerHTML
-; Set the value of element's outerHTML
-PageInst.querySelector("#MainTitle").outerHTML := "Set property is very easy"
+PageInst.querySelector("#MainTitle").innerHTML := "Set property is also very easy"
 
 ; Supports all JS methods of element
-; Call the method to get the element's position
 rect := PageInst.querySelector("#MainTitle").getBoundingClientRect()
 MsgBox % rect.x "`n" rect.y
 
